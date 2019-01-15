@@ -80,9 +80,3 @@ def getdevdata():
     for i in range(5):
         build_dataset(paths[i], r'data/dev/', i, devinputs, devlabels)
     return devinputs, devlabels
-
-#def main():
-#    process_all_data()
-
-#if __name__=="__main__":
-#    main()
