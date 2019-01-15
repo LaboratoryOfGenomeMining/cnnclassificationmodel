@@ -6,34 +6,34 @@ import numpy as np
 MAX_LEN=1000
 MAX_EPISODES=2001
 BATCH_SIZE=50
-INPUT_SIZE=21
+INPUT_SIZE=20
 
-valuedict={"G":0,"A":1,"V":2,"L":3,"I":4,"P":5,"F":6,"Y":7,"W":8,"S":9,"T":10,"C":11,
+value_dict={"G":0,"A":1,"V":2,"L":3,"I":4,"P":5,"F":6,"Y":7,"W":8,"S":9,"T":10,"C":11,
            "M":12,"N":13,"Q":14,"D":15,"E":16,"K":17,"R":18,"H":19}
 
-def Getmat(alpha):
-    num=[0]*21
-    if alpha in valuedict.keys():
-        num[valuedict[alpha]]=1
-    else:
-        num[20]=1
-    return num
-
-def Getseqnum2(seq,maxlen):
+def Seq2Mat(seq,max_len):
     nums=[]
-    for alpha in seq:
-        nums.append(Getmat(alpha))
-    if len(nums)<maxlen:
-        nums.extend([[0]*21]*(maxlen-len(nums)))#pad with zero matrix
-    elif len(nums)>maxlen:
-        nums=nums[:maxlen]
-    return nums
+    usable=True
+    for alpha in seq[:-1]:
+        num = [0] * INPUT_SIZE
+        if alpha in value_dict.keys():
+            num[value_dict[alpha]] = 1
+        else:
+            usable=False
+            break
+        nums.append(num)
+    if usable:
+        if len(nums)<max_len:
+            nums.extend([[0]*INPUT_SIZE]*(max_len-len(nums)))#pad with zero matrix
+        elif len(nums)>max_len:
+            nums=nums[:max_len]
+    return nums,usable
 
 class CNNnet:
-    def __init__(self,inputlen,begin,inputsize):
-        self.inputlen=inputlen
+    def __init__(self,input_len,begin,input_size):
+        self.input_len=input_len
         self.sess=tf.Session()
-        self.inputsize=inputsize
+        self.input_size=input_size
         self.buildnet()
         if begin:
             self.init()
@@ -41,7 +41,7 @@ class CNNnet:
             self.restore()
 
     def buildnet(self):
-        self.tf_x=tf.placeholder(tf.float32,[None,self.inputlen,self.inputsize])
+        self.tf_x=tf.placeholder(tf.float32,[None,self.input_len,self.input_size])
         conv1=tf.layers.conv1d(inputs=self.tf_x,filters=16,kernel_size=4,strides=1,padding='same',activation=tf.nn.relu)
         pool1=tf.layers.max_pooling1d(conv1,pool_size=2,strides=2)
         conv2=tf.layers.conv1d(pool1,32,8,1,'same',activation=tf.nn.relu)
@@ -70,24 +70,34 @@ class CNNnet:
         self.losses=[]
         self.accuracies=[]
         for step in range(MAX_EPISODES):
-            print(step)
             nums=generate_num(BATCH_SIZE,len(inputs)-1)
             batch_inputseqs,batch_labels=batch_yield(nums,inputs,labels)
             batch_inputs=[]
-            for seq in batch_inputseqs:
-                batch_inputs.append(Getseqnum2(seq, MAX_LEN))
-            loss,_=self.sess.run([self.loss,self.optimizer], feed_dict={self.tf_x: batch_inputs, self.tf_y: batch_labels})
+            batch_labels_=[]
+            Seq2Mat(batch_inputseqs[49], MAX_LEN)
+            for i in range(len(batch_inputseqs)):
+                seq_input,seq_usable=Seq2Mat(batch_inputseqs[i],MAX_LEN)
+                if seq_usable:
+                    batch_inputs.append(seq_input)
+                    batch_labels_.append(batch_labels[i])
+            batch_inputs=np.array(batch_inputs)
+            batch_labels_=np.array(batch_labels_)
+            loss,_=self.sess.run([self.loss,self.optimizer], feed_dict={self.tf_x: batch_inputs, self.tf_y: batch_labels_})
             if step%50==0:
-                testinputseqs,testlabels=gettestdata()
-                testinputs=[]
-                for seq in testinputseqs:
-                    testinputs.append(Getseqnum2(seq, MAX_LEN))
-                testoutputs=self.sess.run(tf.argmax(self.output,dimension=1),feed_dict={self.tf_x:testinputs})
-                wrong_num=0
-                for i in range(len(testinputs)):
-                    if(testoutputs[i]!=testlabels[i]):
-                        wrong_num+=1
-                accuracy=(len(testinputs)-wrong_num)/len(testinputs)
+                test_inputseqs,test_labels=gettestdata()
+                test_inputs=[]
+                test_labels_=[]
+                for i in range(len(test_inputseqs)):
+                    seq_input,seq_usable=Seq2Mat(test_inputseqs[i],MAX_LEN)
+                    if seq_usable:
+                        test_inputs.append(seq_input)
+                        test_labels_.append(test_labels[i])
+                test_outputs=self.sess.run(tf.argmax(self.output,axis=1),feed_dict={self.tf_x:test_inputs})
+                error_num=0
+                for i in range(len(test_outputs)):
+                    if(test_outputs[i]!=test_labels_[i]):
+                        error_num+=1
+                accuracy=(len(test_outputs)-error_num)/len(test_outputs)
                 self.accuracies.append(accuracy)
                 self.losses.append(loss)
                 print("test: accuracy=",accuracy)
@@ -119,16 +129,20 @@ class CNNnet:
         saver.restore(self.sess,r'./model/model.ckpt')
 
     def dev(self):
-        devinputseqs, devlabels = getdevdata()
-        devinputs = []
-        for seq in devinputseqs:
-            devinputs.append(Getseqnum2(seq, MAX_LEN))
-        testoutputs = self.sess.run(tf.argmax(self.output, dimension=1), feed_dict={self.tf_x: devinputs})
-        wrong_num = 0
-        for i in range(len(devinputs)):
-            if (testoutputs[i] != devlabels[i]):
-                wrong_num += 1
-        accuracy = (len(devinputs) - wrong_num) / len(devinputs)
+        dev_inputseqs, dev_labels = getdevdata()
+        dev_inputs = []
+        dev_labels_=[]
+        for i in range(len(dev_inputseqs)):
+            seqinput,seq_usable=Seq2Mat(dev_inputseqs[i],MAX_LEN)
+            if seq_usable:
+                dev_inputs.append(seqinput)
+                dev_labels_.append(dev_labels[i])
+        dev_outputs = self.sess.run(tf.argmax(self.output, axis=1), feed_dict={self.tf_x: dev_inputs})
+        error_num = 0
+        for i in range(len(dev_inputs)):
+            if (dev_outputs[i] != dev_labels_[i]):
+                error_num += 1
+        accuracy = (len(dev_inputs) - error_num) / len(dev_inputs)
         print("dev: accuracy=", accuracy)
 
 def main():
